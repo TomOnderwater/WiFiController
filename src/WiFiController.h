@@ -49,9 +49,11 @@ class WiFiController
     int x2();
     int y1();
     int y2();
+    bool connected();
   private:
     int _x1, _y1, _x2, _y2;
     WebsocketsClient client;
+    uint32_t lastUpdate;
     IPAddress myIP;
     void connect();
     WebsocketsServer server;

@@ -31,6 +31,8 @@ void setup() {
 void loop() {
   master->update();
 
+  if (master->connected())
+  {
   Serial.print("x1: ");
   Serial.print(master->x1());
   Serial.print('\t');
@@ -42,4 +44,5 @@ void loop() {
   Serial.print('\t');
   Serial.print("y2: ");
   Serial.println(master->y2());
+  }
 }

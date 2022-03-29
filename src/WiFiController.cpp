@@ -1,5 +1,4 @@
 #include "WiFiController.h"
-#include "Arduino.h"
 
 WiFiController::WiFiController(const char*ssid, const char* pass)
 {
@@ -43,6 +42,7 @@ void WiFiController::connect()
   client = server.accept();
   client.onMessage([&](WebsocketsMessage msg)
   {
+    lastUpdate = millis();
     // update here
     char number[5] = {'\0', '\0', '\0', '\0', '\0'};
     int l = 0;
@@ -72,6 +72,10 @@ void WiFiController::connect()
     _x2 = constrain(values[2], -128, 127);
     _y2 = constrain(values[3], -128, 127);
   });
+}
+bool WiFiController::connected()
+{
+  return ((millis() - lastUpdate) < 200);
 }
 void WiFiController::update()
 {
