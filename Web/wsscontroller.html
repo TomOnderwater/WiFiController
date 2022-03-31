@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta name="viewport" content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height, target-densitydpi=device-dpi" />
+        <title>Joystick test</title>
+        <style>
+body, html { height:100%; }
+
+canvas {
+    position:absolute;
+    width:100%;
+    height:100%;
+}
+
+html, body, div, canvas {
+    margin: 0;
+    padding: 0;
+}
+
+
+        </style>
+    </head>
+<body>
+
+<canvas id="canvas", width = "100%", height = "100%">
+Your browser does not support the HTML canvas tag.</canvas>
+
+<script>
+
+    // use for compressing the webpage
+    // https://gchq.github.io/CyberChef/#recipe=Gzip('Dynamic%20Huffman%20Coding','index.html.gz','',false)To_Hex('0x',0)Split('0x',',0x')
+    
+let canvas, c //= document.getElementById("canvas")
+let dpr //pixel density
+let ongoingTouches = []
+let usedTouches = []
+
+let lastText, lastSend, sendTimeout
+
+document.addEventListener("DOMContentLoaded", startup)
+//document.onfullscreenchange = handleFullScreenChange
+
+let joyLeft, joyRight
+
+const view = document.getElementById('stream')
+const WS_URL = "ws://" + window.location.host + ":82"
+const ws = new WebSocket(WS_URL)
+
+//let outdata
+
+ws.onmessage = message => {
+    if (message.data instanceof Blob) {
+        var urlObject = URL.createObjectURL(message.data);
+        view.src = urlObject;
+    }
+}
+
+
+function JoyStick(side, size)
+{
+    this.active = false
+    this.touch = null
+    this.point = {x: 0, y: 0}
+    this.origin = {x: 0, y: 0}
+    this.size = size || 75
+
+    if (side === "left")
+    {
+        this.lx = 0
+        this.rx = (canvas.width / 2)
+    }
+    else
+    {
+        this.lx = (canvas.width / 2) + 1
+        this.rx = canvas.width
+    }
+    this.draw = function()
+    {
+        c.beginPath()
+        c.fillStyle = 'rgba(100, 100, 100, 0.5)'
+        c.arc(this.origin.x, this.origin.y, this.size, 0, 2 * Math.PI)
+        c.fill()
+
+        c.beginPath()
+        c.fillStyle = 'rgba(200, 200, 200, 0.7)'
+        c.arc(this.point.x, this.point.y, this.size / 3, 0, 2 * Math.PI)
+        c.fill()
+        
+    }
+    this.update = function()
+    {
+        if (!this.active)
+            this.findTouch()
+        else 
+        {
+            let out = this.updateTouch()
+            this.draw()
+            return out
+        }
+        return '0,0'
+    }
+    this.updateData = function()
+    {
+        let x = Math.round(map(this.point.x - this.origin.x, -this.size, this.size, -128, 127))
+        let y = Math.round(map(this.point.y - this.origin.y, -this.size, this.size, 127, -128))
+        return (x + "," + y)
+    }
+    this.updateTouch = function()
+    {
+        let t = getTouchByID(this.touch.identifier)
+        // check if the touch is still going on
+        if (t === null) 
+        {
+            this.active = false
+        }
+        else 
+        {
+            this.touch = t //update pos
+            this.limitReach(this.origin, this.size, this.touch)
+            return this.updateData()
+        }
+        return '0,0'
+    }
+    
+    this.findTouch = function()
+    {
+        for (let t of ongoingTouches)
+        {
+            if (this.inBounds(t) && !used(t.identifier))
+            {
+                this.active = true
+                this.origin.x = t.x
+                this.origin.y = t.y
+                this.touch = t
+                usedTouches.push(t.identifier)
+                break //done
+            }
+        }
+    }
+
+    this.inBounds = function(touch)
+    {
+        return (touch.x > this.lx && touch.x < this.rx)
+    }
+    this.limitReach = function ()
+  {
+      let mag = Math.sqrt(sqdist(this.origin, this.touch))
+      if (mag < this.size) 
+      {
+          this.point.x = this.touch.x
+          this.point.y = this.touch.y
+      }
+      else
+      {
+          let frac = this.size / mag
+          this.point.x = this.origin.x + ((this.touch.x - this.origin.x) * frac)
+          this.point.y = this.origin.y + ((this.touch.y - this.origin.y) * frac)
+      }
+  }
+}
+function map(val, preMin, preMax, newMin, newMax)
+{
+return (val - preMin) * (newMax - newMin) / (preMax - preMin) + newMin
+}
+
+
+function update()
+{
+    c.fillStyle = "rgba(51, 51, 51, 1)"
+    c.fillRect(0, 0, canvas.width, canvas.height)
+    updateUsed()
+    drawBorders()
+
+    let datapacket = joyLeft.update()
+    datapacket += ','
+    datapacket += joyRight.update()
+    send(datapacket)
+}
+
+function send(txt) {
+    //console.log(txt)
+    let now = new Date().getTime()
+    if (lastSend === undefined || now - lastSend >= 30) 
+    {
+        try 
+        {
+            ws.send(txt)
+            lastSend = new Date().getTime()
+            return
+        } 
+        catch (e) 
+        {
+            console.log(e)
+        }
+    }
+    lastText = txt
+    if (!sendTimeout) {
+        var ms = lastSend !== undefined ? 30 - (now - lastSend) : 30
+        if (ms < 0)
+            ms = 0
+        sendTimeout = setTimeout(() => {
+            sendTimeout = null
+            send(lastText)
+        }, ms)
+    }
+}
+
+function drawBorders()
+{
+    c.beginPath()
+    c.setLineDash([5, 5])
+    c.lineWidth = 3
+    c.strokeStyle = 'rgba(255, 255, 255, 0.8)'
+    c.moveTo((canvas.width / 2), 0)
+    c.lineTo((canvas.width / 2), canvas.height)
+    c.stroke()
+}
+
+function startup() {
+    canvas = document.getElementById("canvas")
+
+    resizeCanvas()
+
+    console.log(canvas.width, canvas.height)
+
+    c = canvas.getContext("2d")
+
+    //c.scale(1 / dpr, 1 / dpr)
+
+    joyLeft = new JoyStick("left")
+    joyRight = new JoyStick("right")
+
+    setInterval(update, 40) //send data at 25 hz
+
+    canvas.addEventListener("touchstart", handleStart, false)
+    canvas.addEventListener("touchend", handleEnd, false)
+    canvas.addEventListener("touchcancel", handleCancel, false)
+    canvas.addEventListener("touchmove", handleMove, false)
+
+    window.addEventListener('resize', resizeCanvas, false)
+    window.addEventListener('orientationchange', resizeCanvas, false)
+
+  }
+  function resizeCanvas() {
+    canvas.width = window.innerWidth
+    canvas.height = window.innerHeight
+    joyLeft = new JoyStick("left")
+    joyRight = new JoyStick("right")
+  }
+
+
+  function sqdist(p1, p2)
+  {
+    let dx = p1.x - p2.x
+    let dy = p1.y - p2.y
+    return (dx * dx) + (dy * dy)
+  }
+
+  function used(touchID)
+  {
+    for (let tID of usedTouches)
+    {
+        if (touchID === tID) return true
+    }
+    return false
+  }
+  function updateUsed()
+  {
+    for (let i = 0; i < usedTouches.length; i++)
+        {
+            let found = false
+            for (let t of ongoingTouches)
+            {
+                if (t.identifier === usedTouches[i])
+                {
+                    found = true
+                    break
+                }
+            }
+            if (!found) usedTouches.splice(i, 1)
+        }
+  }
+
+  // create a touch instance
+  function handleStart(evt) {
+    evt.preventDefault()
+    //fullscreen()
+    //console.log("touchstart.");
+    let touches = evt.changedTouches
+    for (let t of touches)
+    {
+        ongoingTouches.push(copyTouch(t))
+    }
+  }
+
+  function logTouches()
+  {
+      for (let t of ongoingTouches)
+      {
+          console.log(t.x, t.y)
+      }
+  }
+
+  // 
+  function handleMove(evt)
+  {
+      evt.preventDefault()
+      let touches = evt.changedTouches
+      for (let t of touches)
+      {
+            // find touch ID
+            let idx = ongoingTouchIndexById(t.identifier)
+            // swap in the new touch record if found
+            if (idx >= 0) ongoingTouches.splice(idx, 1, copyTouch(t))  
+      }
+      //logTouches()
+      //console.log(ongoingTouches)
+  }
+
+  function handleEnd(evt)
+  {
+      evt.preventDefault()
+      let touches = evt.changedTouches
+      for (let t of touches)
+      {
+            // find Touch ID
+            let idx = ongoingTouchIndexById(t.identifier)
+            // remove it; we're done
+            if (idx >= 0) ongoingTouches.splice(idx, 1)
+      }
+  }
+
+  function handleCancel(evt)
+  {
+      evt.preventDefault()
+    let touches = evt.changedTouches
+    for (let t of touches)
+    {
+        let idx = ongoingTouchIndexById(t.identifier)
+        if (idx >= 0) ongoingTouches.splice(idx, 1)
+    }
+
+  }
+
+  function handleCancel(evt) {
+    evt.preventDefault()
+    console.log("touchcancel.")
+    var touches = evt.changedTouches
+  
+    for (var i = 0; i < touches.length; i++) {
+      var idx = ongoingTouchIndexById(touches[i].identifier)
+      ongoingTouches.splice(idx, 1)  // remove it; we're done
+    }
+  }
+
+  function copyTouch({ identifier, pageX, pageY }) {
+    return { identifier, x: pageX, y: pageY }
+  }
+
+  function getTouchByID(id)
+  {
+      for (let t of ongoingTouches)
+      {
+          if (t.identifier === id) return t
+      }
+      return null
+  }
+
+  function ongoingTouchIndexById(idToFind) {
+    for (var i = 0; i < ongoingTouches.length; i++) {
+      var id = ongoingTouches[i].identifier
+  
+      if (id == idToFind) {
+        return i
+      }
+    }
+    return -1    // not found
+  }
+
+</script>
+
+</body>
+</html>
